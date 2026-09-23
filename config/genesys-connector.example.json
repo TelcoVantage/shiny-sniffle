@@ -4,12 +4,14 @@
   "days": 7,
   "queueIds": [],
   "defaultQuestion": "How likely are you to recommend us from zero to ten?",
+  "_detection": "Surveys are detected automatically. Participant-data keys matching surveyKeyPattern are classified by name (utterance, score, confidence, status...). Only set 'attributes' to pin a key the automatic detection does not recognise; leave a value empty to auto-detect it.",
+  "surveyKeyPattern": "(?i)survey|nps|csat|post[._\\s-]?call|feedback",
   "attributes": {
-    "SurveyId": "Survey.Id",
-    "Question": "Survey.Question",
-    "Utterance": "Survey.Utterance",
-    "Score": "Survey.Score",
-    "Confidence": "Survey.Confidence",
-    "Status": "Survey.Status"
+    "SurveyId": "",
+    "Question": "",
+    "Utterance": "",
+    "Score": "",
+    "Confidence": "",
+    "Status": ""
   }
 }

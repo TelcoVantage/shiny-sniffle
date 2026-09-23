@@ -52,8 +52,10 @@ quality teams a repeatable way to measure capture accuracy and find the records 
 - **Official NPS** and a separate, clearly labelled **audit-estimated NPS**.
 - **Four reports:** detail CSV, exceptions CSV, summary CSV, and a standalone HTML report.
 - **Optional Genesys Cloud connector:** OAuth client credentials from environment variables, last
-  7 days by default, Australia region by default, retries on rate limits, one-command download and audit.
-- **198 plain-PowerShell tests** (no Pester required), including end-to-end runs and a mocked API.
+  7 days by default, Australia region by default, **automatic detection of completed, incomplete
+  and declined surveys** (no conversation IDs or attribute names needed), retries on rate limits,
+  one-command download and audit.
+- **227 plain-PowerShell tests** (no Pester required), including end-to-end runs and a mocked API.
 
 ## Example report
 
@@ -134,8 +136,10 @@ secret manager or the Windows environment-variables dialog, never a script. Then
 .\Get-GenesysNpsSurveyData.ps1 -RunAudit -ExportHtmlReport
 ```
 
-This authenticates against `login.mypurecloud.com.au`, queries the last 7 days of conversation
-details from `api.mypurecloud.com.au`, extracts the survey participant data, and runs the audit.
+This authenticates against `login.mypurecloud.com.au` and scans every conversation from the last
+7 days on `api.mypurecloud.com.au`. It **detects completed surveys automatically**, with no
+conversation IDs and no attribute names to configure: survey keys in participant data are
+recognised by name, and native web surveys are picked up too. It then runs the audit.
 Nothing is prompted for, and no credential is stored in code, config, output, or console text.
 Setup, required permissions, and attribute mapping are in
 [docs/genesys-api-connector.md](docs/genesys-api-connector.md).

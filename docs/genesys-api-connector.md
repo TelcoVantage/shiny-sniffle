@@ -56,32 +56,62 @@ The script:
 - never writes the secret or the access token to the console, CSV, or report
 - clears credential and token variables as soon as they are no longer needed
 
-## 3. (Optional) Map your survey flow's participant data
+## 3. Automatic survey detection (nothing to configure)
 
-Voice NPS surveys are normally built in an Architect flow that stores the result in **participant
-data**. The connector reads these attributes from each conversation:
+You don't supply conversation IDs or attribute names. The connector scans **every conversation**
+in the date range and works out for itself which ones contain an NPS survey.
 
-| Auditor column | Default attribute name |
-|---|---|
-| `utterance` | `Survey.Utterance` |
-| `recordedScore` | `Survey.Score` |
-| `confidence` | `Survey.Confidence` |
-| `participantStatus` | `Survey.Status` |
-| `question` | `Survey.Question` |
-| `surveyId` | `Survey.Id` |
+**a) Flow-based voice or bot surveys (participant data).** Architect survey flows store their
+results as participant data. Any participant-data key matching
+`survey | nps | csat | post-call | feedback` (case-insensitive) is treated as survey data. Its
+role is then inferred from the rest of the key name:
 
-If your flow uses different names, copy `config/genesys-connector.example.json` to
-`config/genesys-connector.json` (git-ignored) and edit the `attributes` section. The file holds
-**non-secret settings only**: region, days, queue IDs, default question, and attribute names.
+| Role | Recognised when the key contains | Examples |
+|---|---|---|
+| Utterance | utterance, transcript, verbatim, speech, spoken, said, response text; or `answer` with a text value | `Survey.Utterance`, `PostCall_NPS_Transcript`, `NPS.Answer` = "ten out of ten" |
+| Score | score, rating, value, `nps`; or `answer` / `result` with a numeric value | `Survey.Score`, `NPS_Score`, `NPS`, `CSAT.Rating` |
+| Confidence | confidence | `Survey.Confidence`, `NPS.ASRConfidence` |
+| Status | status, state, result, outcome, disposition, completed, finished | `Survey.Status`, `PostCall_NPS_Result` |
+| Opt-in | opt in / opt out, consent, accept, offered | `Survey.OptIn` |
+| Question / Survey ID | question, prompt / survey id | `Survey.Question`, `Survey.Id` |
 
-Mapping rules:
+Keys that hold counters, timestamps or flow bookkeeping (`AttemptCount`, `StartTime`,
+`FlowVersion`, ...) are ignored. So are keys that don't match the pattern, such as `LeadScore`
+or `Customer.Tier`, so other scores in your org are not mistaken for NPS.
 
-- Conversations with none of the mapped attributes are not surveys and are skipped.
-- `channel` is `Voice` for voice and callback media, and `Digital` for everything else.
-- `completedAt` is the conversation end time (UTC).
-- With no status attribute, the status is `Completed` if a score or utterance exists, and
-  `Disconnected` otherwise (the survey started but no answer was captured).
-- `surveyId` falls back to the conversation ID.
+**b) Genesys Cloud native web surveys.** Conversations whose `surveys` array has a survey with
+status `Finished` and a `surveyPromoterScore` are included, with channel `Web survey`. The
+customer selected the score directly, so the selected value is used as the answer.
+
+**Completed or not?** Each detected survey is classified:
+
+| Detected state | How | In the export |
+|---|---|---|
+| Completed | Status such as Completed, Finished, Success, Answered, Submitted; or no status but a score or utterance exists. A `NoInput` / `NoMatch` status also counts as completed, and the audit reports it as No input or Ambiguous response | Yes |
+| Incomplete | Status such as Timeout, Disconnected, HangUp, Abandoned, Expired, Partial; or survey data exists but nothing was answered | Yes, as audit findings. Excluded with `-CompletedOnly` |
+| Declined | Status such as Declined, OptOut, Refused, Skipped; or an opt-in of No/False with no answer | No (not a response) |
+| Unknown | Any other status value | Yes; the audit flags it as Review required |
+
+The console shows what was detected, so you can check it at a glance:
+
+```text
+Survey detection
+  Conversations scanned : 1840
+  Surveys detected      : 226
+    Completed           : 212
+    Incomplete          : 11  (timeout / disconnect / abandoned)
+    Declined (excluded) : 3
+  Keys recognised:
+    Score=PostCall_NPS_Score                         214 conversation(s)
+    Utterance=PostCall_NPS_Transcript                214 conversation(s)
+    Confidence=PostCall_NPS_Confidence               209 conversation(s)
+    Status=PostCall_NPS_Result                       226 conversation(s)
+```
+
+**Tuning (only if needed).** If your flow's keys don't contain any of the survey keywords, copy
+`config/genesys-connector.example.json` to `config/genesys-connector.json` (git-ignored). Then
+either change `surveyKeyPattern`, or pin exact key names under `attributes` (leave a value empty
+to keep auto-detecting it). Pinned keys are used even if they don't match the pattern.
 
 ## 4. Run it
 
@@ -91,6 +121,9 @@ Mapping rules:
 
 # Download only (audit later)
 .\Get-GenesysNpsSurveyData.ps1
+
+# Only surveys the customer completed (leave out timeouts / disconnects)
+.\Get-GenesysNpsSurveyData.ps1 -CompletedOnly -RunAudit
 
 # Restrict to specific queues
 .\Get-GenesysNpsSurveyData.ps1 -QueueId "<queue-guid-1>","<queue-guid-2>" -RunAudit
@@ -109,7 +142,8 @@ How it works:
    day, 100 conversations per page, following pagination.
 4. Rate limits (HTTP 429) and transient 5xx errors are retried with backoff. A 401 or 403 stops
    the run with a clear message.
-5. Matching conversations are written to `output/genesys-survey-export-YYYYMMDD-HHMMSS.csv`.
+5. Every conversation is checked for survey data (section 3). Detected surveys, minus declined
+   ones, are written to `output/genesys-survey-export-YYYYMMDD-HHMMSS.csv`.
 6. With `-RunAudit`, `Export-GenesysNpsAudit.ps1` runs on that file.
 
 Example console output (fictional):
@@ -141,7 +175,8 @@ Authenticated.
 | `Missing environment variable(s)` | Open a **new** PowerShell window after setting the variables |
 | HTTP 401 | Client ID/secret, the Client Credentials grant type, and the region |
 | HTTP 403 | The role has **Analytics > Conversation Detail > View** for the right divisions |
-| `0 survey responses` | Attribute names in `config/genesys-connector.json` match the survey flow's participant data |
+| `No surveys detected` | Your flow's participant-data keys may not contain survey/nps/csat/post-call/feedback. Set `surveyKeyPattern`, or pin `attributes` in the config |
+| A key is detected in the wrong role | Pin the correct key under `attributes` in the config |
 | TLS or "could not create SSL/TLS secure channel" on Windows PowerShell 5.1 | Ask IT to enable strong cryptography for .NET (`SchUseStrongCrypto`). The script does not change `ServicePointManager`, because that is a .NET static call blocked in CLM |
 | Very large orgs | Use `-QueueId` to narrow the query. The query stops at 500 pages per day with a warning |
 

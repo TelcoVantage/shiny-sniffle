@@ -377,105 +377,265 @@ function ConvertTo-GcIsoTimestamp {
     return ([string]$Value).Trim()
 }
 
-function Get-GcDefaultAttributeMap {
+# ---------------------------------------------------------------------------------------------
+# Automatic survey detection
+# ---------------------------------------------------------------------------------------------
+
+function Get-GcDefaultSurveyKeyPattern {
+    # Participant-data keys matching this pattern are treated as survey data.
+    # Override with "surveyKeyPattern" in config/genesys-connector.json.
+    return '(?i)survey|nps|csat|post[._\s-]?call|feedback'
+}
+
+function Get-GcMergedAttributes {
     <#
     .SYNOPSIS
-        Default participant-data attribute names written by the survey flow.
-        Override them in config/genesys-connector.json to match your Architect flow.
+        Merges participant data from every participant of a conversation into one hashtable.
+        The last non-empty value for a key wins (surveys run at the end of the interaction).
     #>
-    return @{
-        SurveyId   = 'Survey.Id'
-        Question   = 'Survey.Question'
-        Utterance  = 'Survey.Utterance'
-        Score      = 'Survey.Score'
-        Confidence = 'Survey.Confidence'
-        Status     = 'Survey.Status'
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Conversation)
+
+    $merged = @{}
+    foreach ($p in @($Conversation.participants)) {
+        if ($null -eq $p -or $null -eq $p.attributes) { continue }
+        foreach ($prop in @($p.attributes.PSObject.Properties)) {
+            $name = [string]$prop.Name
+            $value = ''
+            if ($null -ne $prop.Value) { $value = ([string]$prop.Value).Trim() }
+            if ($value -ne '') { $merged[$name] = $value }
+            elseif (-not $merged.ContainsKey($name)) { $merged[$name] = '' }
+        }
     }
+    return $merged
+}
+
+function Get-GcSurveyKeyRole {
+    <#
+    .SYNOPSIS
+        Guesses what a survey participant-data key holds from its name (and value when needed).
+    .OUTPUTS
+        One of: Confidence, SurveyId, Question, Utterance, Status, OptIn, Score - or '' (not used).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [AllowEmptyString()][string]$Value = ''
+    )
+
+    $k = $Key.ToLower()
+    # Counters, timestamps and flow bookkeeping are never survey answers.
+    if ($k -match 'count|attempt|retr(y|ies)|timestamp|date|time$|duration|flow|version|language|lang$|url|link') { return '' }
+    if ($k -match 'confidence|conf$') { return 'Confidence' }
+    if ($k -match '(survey|response|nps)[._\s-]*id$') { return 'SurveyId' }
+    if ($k -match 'question|prompt') { if ($k -match 'id$') { return '' }; return 'Question' }
+    if ($k -match 'utterance|transcri|verbatim|speech|spoken|said|response[._\s-]?text|answer[._\s-]?text') { return 'Utterance' }
+    if ($k -match 'opt[._\s-]?in|opt[._\s-]?out|consent|accept|offered|agreed') { return 'OptIn' }
+    if ($k -match 'result|outcome' -and $Value -match '^\s*\d{1,3}\s*$') { return 'Score' }
+    if ($k -match 'status|state$|result|outcome|disposition|completed?$|finished') { return 'Status' }
+    if ($k -match 'answer|response$') {
+        # A free-text answer is an utterance; a bare number is a captured score.
+        if ($Value -match '[a-z]{2,}' -and $Value -notmatch '^\s*\d{1,2}\s*$') { return 'Utterance' }
+        return 'Score'
+    }
+    if ($k -match 'score|rating|nps$|nps[._\s-]?value|value$') { return 'Score' }
+    return ''
+}
+
+function Find-GcSurveyAttributeMap {
+    <#
+    .SYNOPSIS
+        Works out which participant-data keys hold the survey utterance, score, confidence, etc.
+    .DESCRIPTION
+        1. Keys named in -ExplicitMap (from the optional config file) are used first.
+        2. Every other key matching -SurveyKeyPattern is classified by Get-GcSurveyKeyRole.
+        The first key found for each role wins (keys are processed in sorted order, so the
+        result is deterministic). No attribute names need to be configured.
+    .OUTPUTS
+        Hashtable of role -> key name.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Attributes,
+        [hashtable]$ExplicitMap = @{},
+        [string]$SurveyKeyPattern = (Get-GcDefaultSurveyKeyPattern)
+    )
+
+    $map = @{}
+    foreach ($role in @($ExplicitMap.Keys)) {
+        $name = [string]$ExplicitMap[$role]
+        if ($name -ne '' -and $Attributes.ContainsKey($name)) { $map[$role] = $name }
+    }
+
+    foreach ($key in @($Attributes.Keys | Sort-Object)) {
+        if ($map.Values -contains $key) { continue }
+        if ($key -notmatch $SurveyKeyPattern) { continue }
+        $role = Get-GcSurveyKeyRole -Key $key -Value ([string]$Attributes[$key])
+        if ($role -eq '') { continue }
+        if ($map.ContainsKey($role)) {
+            # Prefer a key that actually has a value.
+            if ([string]$Attributes[$map[$role]] -eq '' -and [string]$Attributes[$key] -ne '') { $map[$role] = $key }
+            continue
+        }
+        $map[$role] = $key
+    }
+    return $map
+}
+
+function ConvertTo-GcSurveyState {
+    <#
+    .SYNOPSIS
+        Normalises a survey status value and decides whether the survey was completed.
+    .OUTPUTS
+        @{ Status = <value for participantStatus>; State = Completed | Incomplete | Declined | Unknown }
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$RawStatus = '',
+        [AllowEmptyString()][string]$OptIn = '',
+        [bool]$HasAnswer = $false
+    )
+
+    $s = $RawStatus.Trim().ToLower()
+    $o = $OptIn.Trim().ToLower()
+
+    if ($s -match 'declin|opt[._\s-]?out|refus|reject|skip' -or
+        ($o -match '^(false|no|n|0|declined|optout|opt-out)$' -and -not $HasAnswer)) {
+        return @{ Status = 'Declined'; State = 'Declined' }
+    }
+    if ($s -eq '') {
+        if ($HasAnswer) { return @{ Status = 'Completed'; State = 'Completed' } }
+        # Survey data exists but nothing was answered: the customer left before answering.
+        return @{ Status = 'Disconnected'; State = 'Incomplete' }
+    }
+    if ($s -match 'no[._\s-]?input|no[._\s-]?match|no[._\s-]?answer') {
+        # The survey ran to the end but nothing usable was captured - audited as No input / ambiguous.
+        return @{ Status = 'Completed'; State = 'Completed' }
+    }
+    if ($s -match 'time[._\s-]?d?[._\s-]?out') { return @{ Status = 'Timeout'; State = 'Incomplete' } }
+    if ($s -match 'disconnect|hang|hung|drop') { return @{ Status = 'Disconnected'; State = 'Incomplete' } }
+    if ($s -match 'abandon|expire|incomplete|partial|cancel') { return @{ Status = 'Abandoned'; State = 'Incomplete' } }
+    if ($s -match 'complet|finish|success|done|answered|submitted|captured') { return @{ Status = 'Completed'; State = 'Completed' } }
+    # Unknown values pass through unchanged; the audit flags them as Review required.
+    return @{ Status = $RawStatus.Trim(); State = 'Unknown' }
+}
+
+function Get-GcConversationChannel {
+    # Voice for voice/callback media, Digital for everything else, Unknown if no media found.
+    param([Parameter(Mandatory = $true)]$Conversation)
+
+    $mediaType = ''
+    foreach ($purposeFirst in @($true, $false)) {
+        foreach ($p in @($Conversation.participants)) {
+            if ($null -eq $p) { continue }
+            if ($purposeFirst -and -not ($p.purpose -eq 'customer' -or $p.purpose -eq 'external')) { continue }
+            foreach ($sess in @($p.sessions)) {
+                if ($null -ne $sess -and $sess.mediaType) { $mediaType = [string]$sess.mediaType; break }
+            }
+            if ($mediaType -ne '') { break }
+        }
+        if ($mediaType -ne '') { break }
+    }
+    if ($mediaType -eq '') { return 'Unknown' }
+    if ($mediaType -eq 'voice' -or $mediaType -eq 'callback') { return 'Voice' }
+    return 'Digital'
+}
+
+function New-GcSurveyRow {
+    # Builds a row in the auditor schema plus internal detection fields (prefixed with "Detected").
+    param($SurveyId, $ConversationId, $CompletedAt, $Channel, $Question, $Utterance, $Score,
+          $Confidence, $Status, $State, $Source, $Keys)
+    $row = New-Object PSObject -Property @{
+        surveyId          = [string]$SurveyId
+        conversationId    = [string]$ConversationId
+        completedAt       = [string]$CompletedAt
+        channel           = [string]$Channel
+        question          = [string]$Question
+        utterance         = [string]$Utterance
+        recordedScore     = [string]$Score
+        confidence        = [string]$Confidence
+        participantStatus = [string]$Status
+        DetectedState     = [string]$State
+        DetectedSource    = [string]$Source
+        DetectedKeys      = [string]$Keys
+    }
+    return ($row | Select-Object surveyId, conversationId, completedAt, channel, question, utterance,
+        recordedScore, confidence, participantStatus, DetectedState, DetectedSource, DetectedKeys)
 }
 
 function ConvertFrom-GcConversation {
     <#
     .SYNOPSIS
-        Maps one analytics conversation to a row in the auditor's CSV schema.
+        Detects whether a conversation contains an NPS survey and maps it to the auditor schema.
+
     .DESCRIPTION
-        Survey answers are read from participant data attributes (set by the survey flow).
-        Conversations with none of the mapped attributes are not surveys and return $null.
-        When several participants carry the same attribute, the last non-empty value wins
-        (the survey runs at the end of the interaction).
+        No conversation IDs or attribute names need to be supplied. Two survey sources are detected:
+
+        1. Voice / bot surveys run in an Architect flow, which store results in participant data.
+           Survey keys are discovered automatically by name (see Find-GcSurveyAttributeMap).
+        2. Genesys Cloud native web surveys, returned in the conversation's "surveys" array.
+           Only surveys with status Finished and a promoter score are included.
+
+        Conversations with no survey data return $null.
+
     .OUTPUTS
-        PSObject with surveyId, conversationId, completedAt, channel, question, utterance,
-        recordedScore, confidence, participantStatus - or $null.
+        PSObject with the nine auditor columns plus DetectedState (Completed / Incomplete /
+        Declined / Unknown), DetectedSource, and DetectedKeys - or $null.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Conversation,
-        [Parameter(Mandatory = $true)][hashtable]$AttributeMap,
+        [hashtable]$AttributeMap = @{},
+        [string]$SurveyKeyPattern = (Get-GcDefaultSurveyKeyPattern),
         [string]$DefaultQuestion = 'How likely are you to recommend us from zero to ten?'
     )
 
-    $values = @{}
-    foreach ($field in @('SurveyId', 'Question', 'Utterance', 'Score', 'Confidence', 'Status')) { $values[$field] = '' }
-    $found = $false
-    $mediaType = ''
-
-    foreach ($p in @($Conversation.participants)) {
-        if ($null -eq $p) { continue }
-        if ($mediaType -eq '' -and ($p.purpose -eq 'customer' -or $p.purpose -eq 'external')) {
-            foreach ($s in @($p.sessions)) {
-                if ($null -ne $s -and $s.mediaType) { $mediaType = [string]$s.mediaType; break }
-            }
-        }
-        if ($null -eq $p.attributes) { continue }
-        foreach ($field in @($AttributeMap.Keys)) {
-            $name = [string]$AttributeMap[$field]
-            if ($name -eq '') { continue }
-            $v = $p.attributes.$name
-            if ($null -ne $v -and ([string]$v).Trim() -ne '') {
-                $values[$field] = ([string]$v).Trim()
-                $found = $true
-            }
-        }
-    }
-
-    if (-not $found) { return $null }
-
-    if ($mediaType -eq '') {
-        foreach ($p in @($Conversation.participants)) {
-            foreach ($s in @($p.sessions)) {
-                if ($null -ne $s -and $s.mediaType) { $mediaType = [string]$s.mediaType; break }
-            }
-            if ($mediaType -ne '') { break }
-        }
-    }
-    $channel = 'Digital'
-    if ($mediaType -eq 'voice' -or $mediaType -eq 'callback') { $channel = 'Voice' }
-    if ($mediaType -eq '') { $channel = 'Unknown' }
-
-    # Status: use the flow's own status attribute when present; otherwise infer.
-    $status = $values.Status
-    if ($status -eq '') {
-        if ($values.Utterance -ne '' -or $values.Score -ne '') { $status = 'Completed' }
-        else { $status = 'Disconnected' }
-    }
-
-    $surveyId = $values.SurveyId
-    if ($surveyId -eq '') { $surveyId = [string]$Conversation.conversationId }
-    $question = $values.Question
-    if ($question -eq '') { $question = $DefaultQuestion }
+    $conversationId = [string]$Conversation.conversationId
     $completedAt = ConvertTo-GcIsoTimestamp -Value $Conversation.conversationEnd
     if ($completedAt -eq '') { $completedAt = ConvertTo-GcIsoTimestamp -Value $Conversation.conversationStart }
+    $channel = Get-GcConversationChannel -Conversation $Conversation
 
-    $row = New-Object PSObject -Property @{
-        surveyId          = $surveyId
-        conversationId    = [string]$Conversation.conversationId
-        completedAt       = $completedAt
-        channel           = $channel
-        question          = $question
-        utterance         = $values.Utterance
-        recordedScore     = $values.Score
-        confidence        = $values.Confidence
-        participantStatus = $status
+    # ---- 1. Flow-based survey in participant data ---------------------------------------
+    $attributes = Get-GcMergedAttributes -Conversation $Conversation
+    $map = Find-GcSurveyAttributeMap -Attributes $attributes -ExplicitMap $AttributeMap -SurveyKeyPattern $SurveyKeyPattern
+
+    $core = @($map.Keys | Where-Object { $_ -eq 'Utterance' -or $_ -eq 'Score' -or $_ -eq 'Status' -or $_ -eq 'OptIn' })
+    if ($core.Count -gt 0) {
+        $v = @{}
+        foreach ($role in @('SurveyId', 'Question', 'Utterance', 'Score', 'Confidence', 'Status', 'OptIn')) {
+            $v[$role] = ''
+            if ($map.ContainsKey($role)) { $v[$role] = [string]$attributes[$map[$role]] }
+        }
+        $hasAnswer = ($v.Utterance -ne '' -or $v.Score -ne '')
+        $state = ConvertTo-GcSurveyState -RawStatus $v.Status -OptIn $v.OptIn -HasAnswer $hasAnswer
+
+        $surveyId = $v.SurveyId
+        if ($surveyId -eq '') { $surveyId = $conversationId }
+        $question = $v.Question
+        if ($question -eq '') { $question = $DefaultQuestion }
+        $keys = (@($map.Keys | Sort-Object | ForEach-Object { $_ + '=' + $map[$_] }) -join '; ')
+
+        return (New-GcSurveyRow -SurveyId $surveyId -ConversationId $conversationId -CompletedAt $completedAt `
+            -Channel $channel -Question $question -Utterance $v.Utterance -Score $v.Score -Confidence $v.Confidence `
+            -Status $state.Status -State $state.State -Source 'Participant data' -Keys $keys)
     }
-    return ($row | Select-Object surveyId, conversationId, completedAt, channel, question, utterance,
-        recordedScore, confidence, participantStatus)
+
+    # ---- 2. Native Genesys Cloud survey --------------------------------------------------
+    foreach ($survey in @($Conversation.surveys)) {
+        if ($null -eq $survey) { continue }
+        $score = $survey.surveyPromoterScore
+        if ([string]$survey.surveyStatus -notmatch '(?i)^finished$' -or $null -eq $score -or [string]$score -eq '') { continue }
+        $surveyId = [string]$survey.surveyId
+        if ($surveyId -eq '') { $surveyId = $conversationId }
+        $when = ConvertTo-GcIsoTimestamp -Value $survey.surveyCompletedDate
+        if ($when -eq '') { $when = $completedAt }
+        $question = $DefaultQuestion
+        if ($survey.surveyFormName) { $question = [string]$survey.surveyFormName + ' (NPS question)' }
+        # The customer selected the score directly, so the selection is recorded as the answer.
+        return (New-GcSurveyRow -SurveyId $surveyId -ConversationId $conversationId -CompletedAt $when `
+            -Channel 'Web survey' -Question $question -Utterance ([string]$score) -Score ([string]$score) -Confidence '' `
+            -Status 'Completed' -State 'Completed' -Source 'Native web survey' -Keys 'Score=surveyPromoterScore')
+    }
+
+    return $null
 }

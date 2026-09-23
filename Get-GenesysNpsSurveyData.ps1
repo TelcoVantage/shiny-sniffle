@@ -11,8 +11,12 @@
          config files, output files, or console output.
       2. Gets an access token (client credentials grant) from login.<region>.
       3. Queries analytics conversation details for the last N days (default 7), one day at a time.
-      4. Keeps conversations whose participant data contains the survey attributes and writes them
-         to a git-ignored CSV in the auditor's input schema.
+      4. Detects surveys automatically - no conversation IDs or attribute names are needed:
+           - flow-based voice/bot surveys, by discovering survey keys in participant data
+             (anything matching survey|nps|csat|post-call|feedback), and
+           - Genesys Cloud native web surveys with status Finished.
+         Works out whether each survey was completed, incomplete, or declined, and writes the
+         surveys to a git-ignored CSV in the auditor's input schema.
       5. With -RunAudit, runs Export-GenesysNpsAudit.ps1 on that CSV.
 
     Region precedence : -Region  >  $env:GENESYS_REGION  >  config file  >  mypurecloud.com.au (Australia)
@@ -43,6 +47,10 @@
     Optional non-secret JSON config. Default: .\config\genesys-connector.json (git-ignored).
     See config\genesys-connector.example.json.
 
+.PARAMETER CompletedOnly
+    Export only completed surveys. By default, incomplete surveys (timeout, disconnect,
+    abandoned) are included because they are audit findings. Declined surveys are always excluded.
+
 .PARAMETER RunAudit
     Run Export-GenesysNpsAudit.ps1 on the downloaded data.
 
@@ -67,6 +75,7 @@ param(
     [string[]]$QueueId = @(),
     [string]$OutputPath,
     [string]$ConfigPath,
+    [switch]$CompletedOnly,
     [switch]$RunAudit,
     [switch]$ExportHtmlReport,
     [ValidateRange(0.0, 1.0)][double]$ConfidenceThreshold = 0.70
@@ -133,12 +142,20 @@ try {
     $queues = @($QueueId)
     if ($queues.Count -eq 0 -and $null -ne $config -and $null -ne $config.queueIds) { $queues = @($config.queueIds) }
 
-    $attributeMap = Get-GcDefaultAttributeMap
+    # Survey keys are discovered automatically. The config file can optionally pin exact key
+    # names ("attributes") or change the discovery pattern ("surveyKeyPattern").
+    $attributeMap = @{}
     if ($null -ne $config -and $null -ne $config.attributes) {
-        foreach ($key in @($attributeMap.Keys)) {
-            $override = $config.attributes.$key
-            if ($null -ne $override -and ([string]$override).Trim() -ne '') { $attributeMap[$key] = ([string]$override).Trim() }
+        foreach ($role in @('SurveyId', 'Question', 'Utterance', 'Score', 'Confidence', 'Status')) {
+            $override = $config.attributes.$role
+            if ($null -ne $override -and ([string]$override).Trim() -ne '') { $attributeMap[$role] = ([string]$override).Trim() }
         }
+    }
+    $surveyKeyPattern = Get-GcDefaultSurveyKeyPattern
+    if ($null -ne $config -and $config.surveyKeyPattern) {
+        $surveyKeyPattern = [string]$config.surveyKeyPattern
+        try { 'test' -match $surveyKeyPattern | Out-Null }
+        catch { Write-ConnectorFailure 'Config "surveyKeyPattern" is not a valid regular expression.'; exit 2 }
     }
     $defaultQuestion = 'How likely are you to recommend us from zero to ten?'
     if ($null -ne $config -and $config.defaultQuestion) { $defaultQuestion = [string]$config.defaultQuestion }
@@ -155,7 +172,10 @@ try {
     Write-Host ("OAuth client         : " + (Get-GcMaskedValue $credential.ClientId) + '  (from GENESYS_CLIENT_ID)')
     Write-Host ("Date range (UTC)     : $firstStart  ->  $lastEnd  ($Days day(s))")
     if ($queues.Count -gt 0) { Write-Host ('Queue filter         : ' + $queues.Count + ' queue(s)') }
-    Write-Host ("Survey attributes    : " + $attributeMap.Utterance + ', ' + $attributeMap.Score + ', ' + $attributeMap.Confidence + ', ' + $attributeMap.Status)
+    $pinned = ''
+    if ($attributeMap.Count -gt 0) { $pinned = ' + ' + $attributeMap.Count + ' pinned key(s) from config' }
+    Write-Host ("Survey detection     : automatic (participant keys matching '" + $surveyKeyPattern + "'" + $pinned + '; native web surveys)')
+    if ($CompletedOnly) { Write-Host 'Filter               : completed surveys only' }
     Write-Host ''
 
     # ---- Authenticate --------------------------------------------------------------------
@@ -167,23 +187,57 @@ try {
     Write-Host 'Authenticated.' -ForegroundColor Green
 
     # ---- Query, one day at a time ------------------------------------------------------
-    $rows = @()
+    $detected = @()
     $conversationCount = 0
     try {
         foreach ($interval in $intervals) {
             $conversations = @(Get-GcConversationDetails -ApiBaseUri $apiBase -AccessToken $token -Interval $interval -QueueIds $queues)
-            $dayRows = @()
+            $daySurveys = @()
             foreach ($c in $conversations) {
-                $row = ConvertFrom-GcConversation -Conversation $c -AttributeMap $attributeMap -DefaultQuestion $defaultQuestion
-                if ($null -ne $row) { $dayRows += $row }
+                $row = ConvertFrom-GcConversation -Conversation $c -AttributeMap $attributeMap `
+                    -SurveyKeyPattern $surveyKeyPattern -DefaultQuestion $defaultQuestion
+                if ($null -ne $row) { $daySurveys += $row }
             }
             $conversationCount += $conversations.Count
-            $rows += $dayRows
-            Write-Host ('  {0}  conversations: {1,6}   survey responses: {2,5}' -f ($interval -split 'T')[0], $conversations.Count, $dayRows.Count)
+            $detected += $daySurveys
+            $dayCompleted = @($daySurveys | Where-Object { $_.DetectedState -eq 'Completed' }).Count
+            Write-Host ('  {0}  conversations: {1,6}   surveys detected: {2,5}   completed: {3,5}' -f `
+                ($interval -split 'T')[0], $conversations.Count, $daySurveys.Count, $dayCompleted)
         }
     }
     catch { Write-ConnectorFailure $_.Exception.Message; exit 3 }
     finally { $token = $null }
+
+    # ---- Detection summary ---------------------------------------------------------------
+    $completed = @($detected | Where-Object { $_.DetectedState -eq 'Completed' })
+    $incomplete = @($detected | Where-Object { $_.DetectedState -eq 'Incomplete' })
+    $declined = @($detected | Where-Object { $_.DetectedState -eq 'Declined' })
+    $unknown = @($detected | Where-Object { $_.DetectedState -eq 'Unknown' })
+
+    # Declined surveys are not responses; incomplete ones are kept unless -CompletedOnly.
+    $rows = @($detected | Where-Object { $_.DetectedState -ne 'Declined' })
+    if ($CompletedOnly) { $rows = @($completed) }
+
+    Write-Host ''
+    Write-Host 'Survey detection' -ForegroundColor Cyan
+    Write-Host ("  Conversations scanned : $conversationCount")
+    Write-Host ("  Surveys detected      : " + $detected.Count)
+    Write-Host ("    Completed           : " + $completed.Count)
+    Write-Host ("    Incomplete          : " + $incomplete.Count + '  (timeout / disconnect / abandoned)')
+    Write-Host ("    Declined (excluded) : " + $declined.Count)
+    if ($unknown.Count -gt 0) { Write-Host ("    Unknown status      : " + $unknown.Count + '  (flagged for review in the audit)') }
+
+    # Which participant-data keys were recognised, so the detection can be verified at a glance.
+    $keyUsage = @($detected | Where-Object { $_.DetectedKeys -ne '' } | ForEach-Object { ($_.DetectedKeys -split '; ') } |
+        Group-Object | Sort-Object -Property Count -Descending)
+    if ($keyUsage.Count -gt 0) {
+        Write-Host '  Keys recognised:'
+        foreach ($k in ($keyUsage | Select-Object -First 12)) {
+            Write-Host ('    {0,-45} {1,6} conversation(s)' -f $k.Name, $k.Count)
+        }
+    }
+    $native = @($detected | Where-Object { $_.DetectedSource -eq 'Native web survey' }).Count
+    if ($native -gt 0) { Write-Host ("  Native web surveys    : $native") }
 
     # ---- Write the CSV -------------------------------------------------------------------
     if (-not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
@@ -200,12 +254,11 @@ try {
     }
 
     Write-Host ''
-    Write-Host ("Conversations scanned: $conversationCount")
-    Write-Host ("Survey responses     : " + $rows.Count)
+    Write-Host ("Surveys exported     : " + $rows.Count)
     Write-Host ("Export written       : $exportFile")
-    if ($rows.Count -eq 0) {
-        Write-Host ('No survey responses found. If surveys ran in this period, check that the attribute names in ' +
-            'config\genesys-connector.json match the participant data your survey flow sets.') -ForegroundColor Yellow
+    if ($detected.Count -eq 0) {
+        Write-Host ('No surveys detected. If surveys ran in this period, their participant-data keys may not contain ' +
+            'survey/nps/csat/post-call/feedback: set "surveyKeyPattern" or pin "attributes" in config\genesys-connector.json.') -ForegroundColor Yellow
     }
 
     # ---- Optional audit ------------------------------------------------------------------

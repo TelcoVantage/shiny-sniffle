@@ -313,7 +313,7 @@ Assert-Equal -Name 'Masked client id shows last 4 only' -Actual (Get-GcMaskedVal
 # Mapping a conversation to the auditor schema (fictional IDs)
 $fixtureJson = @'
 {
-  "totalHits": 4,
+  "totalHits": 8,
   "conversations": [
     { "conversationId": "sample-conv-9001", "conversationStart": "2026-09-20T01:00:00.000Z", "conversationEnd": "2026-09-20T01:06:00.000Z",
       "participants": [
@@ -328,17 +328,36 @@ $fixtureJson = @'
     { "conversationId": "sample-conv-9004", "conversationStart": "2026-09-20T04:00:00.000Z", "conversationEnd": "2026-09-20T04:01:00.000Z",
       "participants": [
         { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ] },
-        { "purpose": "ivr", "sessions": [ { "mediaType": "voice" } ], "attributes": { "Survey.Status": "Timeout" } } ] }
+        { "purpose": "ivr", "sessions": [ { "mediaType": "voice" } ], "attributes": { "Survey.Status": "Timeout" } } ] },
+    { "conversationId": "sample-conv-9005", "conversationStart": "2026-09-20T05:00:00.000Z", "conversationEnd": "2026-09-20T05:05:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ],
+          "attributes": { "PostCall_NPS_Transcript": "I'd say a 9", "PostCall_NPS_Score": "6", "PostCall_NPS_Confidence": "0.71",
+                          "PostCall_NPS_Result": "Finished", "Customer.Tier": "Gold", "LeadScore": "88" } } ] },
+    { "conversationId": "sample-conv-9006", "conversationStart": "2026-09-20T06:00:00.000Z", "conversationEnd": "2026-09-20T06:03:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ], "attributes": { "Survey.OptIn": "No" } } ] },
+    { "conversationId": "sample-conv-9007", "conversationStart": "2026-09-20T07:00:00.000Z", "conversationEnd": "2026-09-20T07:10:00.000Z",
+      "participants": [ { "purpose": "customer", "sessions": [ { "mediaType": "message" } ] } ],
+      "surveys": [ { "surveyId": "sample-websurvey-0001", "surveyStatus": "Finished", "surveyPromoterScore": 10,
+                     "surveyFormName": "Sample NPS Form", "surveyCompletedDate": "2026-09-20T08:00:00.000Z" } ] },
+    { "conversationId": "sample-conv-9008", "conversationStart": "2026-09-20T08:00:00.000Z", "conversationEnd": "2026-09-20T08:03:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ], "attributes": { "LeadScore": "7", "Intent.Result": "Billing" } } ] }
   ]
 }
 '@
 $fixture = $fixtureJson | ConvertFrom-Json
 $global:NpsMockFixture = $fixture
-$map = Get-GcDefaultAttributeMap
-$r1 = ConvertFrom-GcConversation -Conversation $fixture.conversations[0] -AttributeMap $map
-$r2 = ConvertFrom-GcConversation -Conversation $fixture.conversations[1] -AttributeMap $map
-$r3 = ConvertFrom-GcConversation -Conversation $fixture.conversations[2] -AttributeMap $map
-$r4 = ConvertFrom-GcConversation -Conversation $fixture.conversations[3] -AttributeMap $map
+# No attribute names or conversation IDs are supplied: surveys are detected automatically.
+$r1 = ConvertFrom-GcConversation -Conversation $fixture.conversations[0]
+$r2 = ConvertFrom-GcConversation -Conversation $fixture.conversations[1]
+$r3 = ConvertFrom-GcConversation -Conversation $fixture.conversations[2]
+$r4 = ConvertFrom-GcConversation -Conversation $fixture.conversations[3]
+$r5 = ConvertFrom-GcConversation -Conversation $fixture.conversations[4]
+$r6 = ConvertFrom-GcConversation -Conversation $fixture.conversations[5]
+$r7 = ConvertFrom-GcConversation -Conversation $fixture.conversations[6]
+$r8 = ConvertFrom-GcConversation -Conversation $fixture.conversations[7]
 Assert-Equal -Name 'Mapped voice survey: utterance' -Actual $r1.utterance -Expected 'ten out of ten'
 Assert-Equal -Name 'Mapped voice survey: channel Voice' -Actual $r1.channel -Expected 'Voice'
 Assert-Equal -Name 'Mapped voice survey: completedAt = conversationEnd' -Actual $r1.completedAt -Expected '2026-09-20T01:06:00.000Z'
@@ -346,6 +365,36 @@ Assert-Equal -Name 'Mapped voice survey: inferred status Completed' -Actual $r1.
 Assert-Equal -Name 'Mapped messaging survey: channel Digital' -Actual $r2.channel -Expected 'Digital'
 Write-TestResult -Name 'Conversation without survey attributes is skipped' -Passed ($null -eq $r3) -Detail 'row returned'
 Assert-Equal -Name 'Survey status attribute on another participant is used' -Actual $r4.participantStatus -Expected 'Timeout'
+Assert-Equal -Name 'Timeout survey detected as Incomplete' -Actual $r4.DetectedState -Expected 'Incomplete'
+Assert-Equal -Name 'Auto-detect: custom key names - utterance' -Actual $r5.utterance -Expected "I'd say a 9"
+Assert-Equal -Name 'Auto-detect: custom key names - score' -Actual $r5.recordedScore -Expected '6'
+Assert-Equal -Name 'Auto-detect: custom key names - confidence' -Actual $r5.confidence -Expected '0.71'
+Assert-Equal -Name 'Auto-detect: "Finished" result = Completed' -Actual $r5.DetectedState -Expected 'Completed'
+Write-TestResult -Name 'Auto-detect: non-survey keys (LeadScore, Customer.Tier) ignored' -Passed ($r5.DetectedKeys -notmatch 'LeadScore|Tier') -Detail $r5.DetectedKeys
+Assert-Equal -Name 'Survey opt-in "No" detected as Declined' -Actual $r6.DetectedState -Expected 'Declined'
+Assert-Equal -Name 'Native web survey detected' -Actual $r7.DetectedSource -Expected 'Native web survey'
+Assert-Equal -Name 'Native web survey score' -Actual $r7.recordedScore -Expected '10'
+Assert-Equal -Name 'Native web survey channel' -Actual $r7.channel -Expected 'Web survey'
+Write-TestResult -Name 'Conversation with only non-survey attributes is skipped' -Passed ($null -eq $r8) -Detail 'row returned'
+
+# Key role and status classification
+Assert-Equal -Name 'Key role: Survey.Utterance' -Actual (Get-GcSurveyKeyRole -Key 'Survey.Utterance') -Expected 'Utterance'
+Assert-Equal -Name 'Key role: NPS_Score' -Actual (Get-GcSurveyKeyRole -Key 'NPS_Score') -Expected 'Score'
+Assert-Equal -Name 'Key role: NPS' -Actual (Get-GcSurveyKeyRole -Key 'NPS') -Expected 'Score'
+Assert-Equal -Name 'Key role: Survey.ASRConfidence' -Actual (Get-GcSurveyKeyRole -Key 'Survey.ASRConfidence') -Expected 'Confidence'
+Assert-Equal -Name 'Key role: Survey.Answer with text = Utterance' -Actual (Get-GcSurveyKeyRole -Key 'Survey.Answer' -Value 'ten out of ten') -Expected 'Utterance'
+Assert-Equal -Name 'Key role: Survey.Answer with number = Score' -Actual (Get-GcSurveyKeyRole -Key 'Survey.Answer' -Value '8') -Expected 'Score'
+Assert-Equal -Name 'Key role: Survey.AttemptCount ignored' -Actual (Get-GcSurveyKeyRole -Key 'Survey.AttemptCount' -Value '2') -Expected ''
+Assert-Equal -Name 'Key role: Survey.StartTime ignored' -Actual (Get-GcSurveyKeyRole -Key 'Survey.StartTime') -Expected ''
+Assert-Equal -Name 'Status "Completed"' -Actual (ConvertTo-GcSurveyState -RawStatus 'Completed' -HasAnswer $true).State -Expected 'Completed'
+Assert-Equal -Name 'Status "NoInput" is a completed survey (audited as No input)' -Actual (ConvertTo-GcSurveyState -RawStatus 'NoInput').Status -Expected 'Completed'
+Assert-Equal -Name 'Status "timed_out" = Timeout' -Actual (ConvertTo-GcSurveyState -RawStatus 'timed_out').Status -Expected 'Timeout'
+Assert-Equal -Name 'Status "CustomerHangUp" = Disconnected' -Actual (ConvertTo-GcSurveyState -RawStatus 'CustomerHangUp').Status -Expected 'Disconnected'
+Assert-Equal -Name 'Status "OptOut" = Declined' -Actual (ConvertTo-GcSurveyState -RawStatus 'OptOut').State -Expected 'Declined'
+Assert-Equal -Name 'No status, no answer = Incomplete' -Actual (ConvertTo-GcSurveyState -RawStatus '' -HasAnswer $false).State -Expected 'Incomplete'
+$pinned = ConvertFrom-GcConversation -Conversation ('{"conversationId":"sample-conv-9010","participants":[{"purpose":"customer","sessions":[{"mediaType":"voice"}],"attributes":{"Cx.Heard":"seven","Cx.Captured":"7"}}]}' | ConvertFrom-Json) `
+    -AttributeMap @{ Utterance = 'Cx.Heard'; Score = 'Cx.Captured' }
+Assert-Equal -Name 'Pinned keys from config are used even without survey keywords' -Actual ($pinned.utterance + '/' + $pinned.recordedScore) -Expected 'seven/7'
 
 # Mocked API: this function shadows the Invoke-RestMethod cmdlet for the rest of the test run.
 $global:NpsMockCalls = @()
@@ -404,7 +453,8 @@ if (-not $SkipIntegration) {
     if ($export.Count -eq 1) {
         $exportText = Get-Content -LiteralPath $export[0].FullName -Raw
         $exportRows = @(Import-Csv -LiteralPath $export[0].FullName)
-        Assert-Equal -Name 'Export contains the 3 survey conversations' -Actual $exportRows.Count -Expected 3
+        Assert-Equal -Name 'Export contains 5 surveys (declined and non-survey excluded)' -Actual $exportRows.Count -Expected 5
+        Write-TestResult -Name 'Export has exactly the auditor schema columns' -Passed ((@($exportRows[0].PSObject.Properties | ForEach-Object { $_.Name }) -join ',') -eq 'surveyId,conversationId,completedAt,channel,question,utterance,recordedScore,confidence,participantStatus') -Detail 'column mismatch'
         Write-TestResult -Name 'Export CSV contains no credentials' -Passed ($exportText -notmatch 'test-secret|mock-access-token') -Detail 'credential in file'
     }
     $auditDetail = @(Get-ChildItem -LiteralPath $connectorOut -Filter 'nps-audit-detail-*.csv')
@@ -412,8 +462,19 @@ if (-not $SkipIntegration) {
         $auditRows = @(Import-Csv -LiteralPath $auditDetail[0].FullName)
         $missed = @($auditRows | Where-Object { $_.ConversationId -eq 'sample-conv-9001' })[0]
         Assert-Equal -Name 'Audit on API data flags the missed score' -Actual $missed.AuditStatus -Expected 'Likely missed score'
+        $mismatch = @($auditRows | Where-Object { $_.ConversationId -eq 'sample-conv-9005' })[0]
+        Assert-Equal -Name 'Audit on auto-detected survey flags the mismatch' -Actual $mismatch.AuditStatus -Expected 'Score mismatch'
     }
     else { Write-TestResult -Name 'Audit ran on API data' -Passed $false -Detail 'no detail report' }
+
+    # -CompletedOnly keeps completed surveys only
+    $completedOut = Join-Path $connectorOut 'completed-only'
+    $global:NpsMockCalls = @()
+    & $connectorScript -OutputPath $completedOut -ConfigPath $noConfig -CompletedOnly *> $null
+    $completedExport = @(Get-ChildItem -LiteralPath $completedOut -Filter 'genesys-survey-export-*.csv' -ErrorAction SilentlyContinue)
+    $completedRows = @()
+    if ($completedExport.Count -eq 1) { $completedRows = @(Import-Csv -LiteralPath $completedExport[0].FullName) }
+    Assert-Equal -Name '-CompletedOnly exports the 4 completed surveys' -Actual $completedRows.Count -Expected 4
 
     # Missing credentials -> exit 2, and no API call is made
     $env:GENESYS_CLIENT_SECRET = ''
