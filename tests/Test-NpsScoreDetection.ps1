@@ -10,6 +10,7 @@
       4. Audit classification (mismatch, missed score, low confidence, abandoned, etc.).
       5. NPS calculation.
       6. End-to-end run of Export-GenesysNpsAudit.ps1 against the synthetic sample data.
+      7. Genesys Cloud connector with a mocked API (no network, no real credentials).
 
     Prints PASS/FAIL per test and exits with code 1 if any test fails.
     CLM-safe: runs under Constrained Language Mode on Windows PowerShell 5.1.
@@ -258,6 +259,190 @@ if (-not $SkipIntegration) {
 
     Remove-Item -LiteralPath $testOutput -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# ---------------------------------------------------------------------------------------------
+# 6. Genesys Cloud connector (offline - Invoke-RestMethod is mocked, no network calls)
+# ---------------------------------------------------------------------------------------------
+
+Write-Host ''
+Write-Host 'Genesys Cloud connector (offline, mocked API)' -ForegroundColor Cyan
+
+. (Join-Path $repoRoot 'GenesysCloudApi.ps1')
+
+# Base64 (RFC 4648 test vectors + a classic Basic-auth example)
+Assert-Equal -Name 'Base64 ""' -Actual (ConvertTo-GcBase64 -Text '') -Expected ''
+Assert-Equal -Name 'Base64 "f"' -Actual (ConvertTo-GcBase64 -Text 'f') -Expected 'Zg=='
+Assert-Equal -Name 'Base64 "fo"' -Actual (ConvertTo-GcBase64 -Text 'fo') -Expected 'Zm8='
+Assert-Equal -Name 'Base64 "foo"' -Actual (ConvertTo-GcBase64 -Text 'foo') -Expected 'Zm9v'
+Assert-Equal -Name 'Base64 "foobar"' -Actual (ConvertTo-GcBase64 -Text 'foobar') -Expected 'Zm9vYmFy'
+Assert-Equal -Name 'Base64 "Aladdin:open sesame"' -Actual (ConvertTo-GcBase64 -Text 'Aladdin:open sesame') -Expected 'QWxhZGRpbjpvcGVuIHNlc2FtZQ=='
+Assert-Equal -Name 'Base64 UTF-8 "e-acute"' -Actual (ConvertTo-GcBase64 -Text ([string][char]0x00E9)) -Expected 'w6k='
+
+# Regions
+Assert-Equal -Name 'Region "Australia"' -Actual (Get-GcRegionDomain -Region 'Australia') -Expected 'mypurecloud.com.au'
+Assert-Equal -Name 'Region "ap-southeast-2"' -Actual (Get-GcRegionDomain -Region 'ap-southeast-2') -Expected 'mypurecloud.com.au'
+Assert-Equal -Name 'Region "https://api.mypurecloud.com.au/"' -Actual (Get-GcRegionDomain -Region 'https://api.mypurecloud.com.au/') -Expected 'mypurecloud.com.au'
+$regionRejected = $false
+try { Get-GcRegionDomain -Region 'evil.example.com' | Out-Null } catch { $regionRejected = $true }
+Write-TestResult -Name 'Unknown region domain is rejected' -Passed $regionRejected -Detail 'accepted'
+
+# Date range: 7 contiguous one-day UTC intervals ending at the supplied time
+$fixedEnd = Get-Date -Date '2026-09-23T10:15:42'
+$intervals = @(Get-GcDailyIntervals -Days 7 -EndUtc $fixedEnd)
+Assert-Equal -Name 'Last 7 days = 7 intervals' -Actual $intervals.Count -Expected 7
+Assert-Equal -Name 'First interval starts 7 days back' -Actual (($intervals[0] -split '/')[0]) -Expected '2026-09-16T10:15:00.000Z'
+Assert-Equal -Name 'Last interval ends now (to the minute)' -Actual (($intervals[6] -split '/')[1]) -Expected '2026-09-23T10:15:00.000Z'
+$contiguous = $true
+for ($i = 1; $i -lt $intervals.Count; $i++) {
+    if ((($intervals[$i - 1] -split '/')[1]) -ne (($intervals[$i] -split '/')[0])) { $contiguous = $false }
+}
+Write-TestResult -Name 'Intervals are contiguous' -Passed $contiguous -Detail 'gap or overlap'
+
+# Credentials come only from the environment
+$savedId = $env:GENESYS_CLIENT_ID
+$savedSecret = $env:GENESYS_CLIENT_SECRET
+$savedRegion = $env:GENESYS_REGION
+$env:GENESYS_CLIENT_ID = ''
+$env:GENESYS_CLIENT_SECRET = ''
+$env:GENESYS_REGION = ''
+$missingThrows = $false
+try { Get-GcCredentialFromEnvironment | Out-Null } catch { $missingThrows = ($_.Exception.Message -match 'GENESYS_CLIENT_ID') }
+Write-TestResult -Name 'Missing credential environment variables give a clear error' -Passed $missingThrows -Detail 'no error'
+Assert-Equal -Name 'Masked client id shows last 4 only' -Actual (Get-GcMaskedValue 'abcdef123456') -Expected '****3456'
+
+# Mapping a conversation to the auditor schema (fictional IDs)
+$fixtureJson = @'
+{
+  "totalHits": 4,
+  "conversations": [
+    { "conversationId": "sample-conv-9001", "conversationStart": "2026-09-20T01:00:00.000Z", "conversationEnd": "2026-09-20T01:06:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ],
+          "attributes": { "Survey.Utterance": "ten out of ten", "Survey.Score": "", "Survey.Confidence": "0.58" } } ] },
+    { "conversationId": "sample-conv-9002", "conversationStart": "2026-09-20T02:00:00.000Z", "conversationEnd": "2026-09-20T02:04:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "message" } ],
+          "attributes": { "Survey.Utterance": "9", "Survey.Score": "9" } } ] },
+    { "conversationId": "sample-conv-9003", "conversationStart": "2026-09-20T03:00:00.000Z", "conversationEnd": "2026-09-20T03:02:00.000Z",
+      "participants": [ { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ] } ] },
+    { "conversationId": "sample-conv-9004", "conversationStart": "2026-09-20T04:00:00.000Z", "conversationEnd": "2026-09-20T04:01:00.000Z",
+      "participants": [
+        { "purpose": "customer", "sessions": [ { "mediaType": "voice" } ] },
+        { "purpose": "ivr", "sessions": [ { "mediaType": "voice" } ], "attributes": { "Survey.Status": "Timeout" } } ] }
+  ]
+}
+'@
+$fixture = $fixtureJson | ConvertFrom-Json
+$global:NpsMockFixture = $fixture
+$map = Get-GcDefaultAttributeMap
+$r1 = ConvertFrom-GcConversation -Conversation $fixture.conversations[0] -AttributeMap $map
+$r2 = ConvertFrom-GcConversation -Conversation $fixture.conversations[1] -AttributeMap $map
+$r3 = ConvertFrom-GcConversation -Conversation $fixture.conversations[2] -AttributeMap $map
+$r4 = ConvertFrom-GcConversation -Conversation $fixture.conversations[3] -AttributeMap $map
+Assert-Equal -Name 'Mapped voice survey: utterance' -Actual $r1.utterance -Expected 'ten out of ten'
+Assert-Equal -Name 'Mapped voice survey: channel Voice' -Actual $r1.channel -Expected 'Voice'
+Assert-Equal -Name 'Mapped voice survey: completedAt = conversationEnd' -Actual $r1.completedAt -Expected '2026-09-20T01:06:00.000Z'
+Assert-Equal -Name 'Mapped voice survey: inferred status Completed' -Actual $r1.participantStatus -Expected 'Completed'
+Assert-Equal -Name 'Mapped messaging survey: channel Digital' -Actual $r2.channel -Expected 'Digital'
+Write-TestResult -Name 'Conversation without survey attributes is skipped' -Passed ($null -eq $r3) -Detail 'row returned'
+Assert-Equal -Name 'Survey status attribute on another participant is used' -Actual $r4.participantStatus -Expected 'Timeout'
+
+# Mocked API: this function shadows the Invoke-RestMethod cmdlet for the rest of the test run.
+$global:NpsMockCalls = @()
+$global:NpsMockFail401 = $false
+function Invoke-RestMethod {
+    param($Method, $Uri, $Headers, $ContentType, $Body, [switch]$UseBasicParsing, $ErrorAction)
+    $global:NpsMockCalls += @{ Method = $Method; Uri = [string]$Uri; Auth = [string]$Headers.Authorization; Body = [string]$Body }
+    if ($Uri -like '*/oauth/token') {
+        if ($global:NpsMockFail401) { throw 'The remote server returned an error: (401) Unauthorized.' }
+        return (New-Object PSObject -Property @{ access_token = 'mock-access-token'; token_type = 'bearer'; expires_in = 86400 })
+    }
+    if ($Uri -like '*/api/v2/analytics/conversations/details/query') {
+        # Validate the request body the connector sends.
+        $q = $Body | ConvertFrom-Json
+        if ([string]$q.interval -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$') { throw ('Bad interval in mock: ' + $q.interval) }
+        if ([int]$q.paging.pageSize -ne 100) { throw 'Bad page size in mock' }
+        if ([string]$Headers.Authorization -ne 'Bearer mock-access-token') { throw 'Bad bearer token in mock' }
+        # Return the fixture for the first day only; other days are empty.
+        if (@($global:NpsMockCalls | Where-Object { $_.Uri -like '*details/query' }).Count -eq 1) { return $global:NpsMockFixture }
+        return (New-Object PSObject -Property @{ totalHits = 0 })
+    }
+    throw ('Unexpected URI in mock: ' + $Uri)
+}
+
+$env:GENESYS_CLIENT_ID = 'test-client-id-0000'
+$env:GENESYS_CLIENT_SECRET = 'test-secret-do-not-print'
+
+$token = Get-GcAccessToken -LoginBaseUri 'https://login.mypurecloud.com.au' -ClientId 'test-client-id-0000' -ClientSecret 'test-secret-do-not-print'
+Assert-Equal -Name 'Access token returned from mocked OAuth' -Actual $token -Expected 'mock-access-token'
+Assert-Equal -Name 'Token request uses Australia login host' -Actual $global:NpsMockCalls[0].Uri -Expected 'https://login.mypurecloud.com.au/oauth/token'
+Assert-Equal -Name 'Token request sends Basic auth (pure PowerShell Base64)' -Actual $global:NpsMockCalls[0].Auth `
+    -Expected ('Basic ' + (ConvertTo-GcBase64 -Text 'test-client-id-0000:test-secret-do-not-print'))
+
+$global:NpsMockFail401 = $true
+$authError = ''
+try { Get-GcAccessToken -LoginBaseUri 'https://login.mypurecloud.com.au' -ClientId 'x' -ClientSecret 'y' | Out-Null } catch { $authError = $_.Exception.Message }
+Write-TestResult -Name 'HTTP 401 gives a clear authentication error' -Passed ($authError -match '401') -Detail $authError
+$global:NpsMockFail401 = $false
+
+if (-not $SkipIntegration) {
+    $connectorScript = Join-Path $repoRoot 'Get-GenesysNpsSurveyData.ps1'
+    $connectorOut = Join-Path (Join-Path $repoRoot 'output') ('_test-connector-' + (Get-Date -Format 'yyyyMMddHHmmss'))
+    $noConfig = Join-Path $connectorOut 'no-config.json'
+
+    $global:NpsMockCalls = @()
+    $console = (& $connectorScript -OutputPath $connectorOut -ConfigPath $noConfig -RunAudit *>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { Write-Host $console }
+    Assert-Equal -Name 'Connector + audit exit code 0' -Actual $LASTEXITCODE -Expected 0
+    Assert-Equal -Name 'Connector queries 7 daily intervals by default' -Actual @($global:NpsMockCalls | Where-Object { $_.Uri -like '*details/query' }).Count -Expected 7
+    Write-TestResult -Name 'Connector uses Australia API host by default' -Passed (@($global:NpsMockCalls | Where-Object { $_.Uri -like 'https://api.mypurecloud.com.au/*' }).Count -eq 7) -Detail 'wrong host'
+    Write-TestResult -Name 'Client secret never printed to console' -Passed ($console -notmatch 'test-secret-do-not-print') -Detail 'secret found in output'
+    Write-TestResult -Name 'Access token never printed to console' -Passed ($console -notmatch 'mock-access-token') -Detail 'token found in output'
+
+    $export = @(Get-ChildItem -LiteralPath $connectorOut -Filter 'genesys-survey-export-*.csv')
+    Write-TestResult -Name 'Connector writes export CSV' -Passed ($export.Count -eq 1) -Detail ('found ' + $export.Count)
+    if ($export.Count -eq 1) {
+        $exportText = Get-Content -LiteralPath $export[0].FullName -Raw
+        $exportRows = @(Import-Csv -LiteralPath $export[0].FullName)
+        Assert-Equal -Name 'Export contains the 3 survey conversations' -Actual $exportRows.Count -Expected 3
+        Write-TestResult -Name 'Export CSV contains no credentials' -Passed ($exportText -notmatch 'test-secret|mock-access-token') -Detail 'credential in file'
+    }
+    $auditDetail = @(Get-ChildItem -LiteralPath $connectorOut -Filter 'nps-audit-detail-*.csv')
+    if ($auditDetail.Count -eq 1) {
+        $auditRows = @(Import-Csv -LiteralPath $auditDetail[0].FullName)
+        $missed = @($auditRows | Where-Object { $_.ConversationId -eq 'sample-conv-9001' })[0]
+        Assert-Equal -Name 'Audit on API data flags the missed score' -Actual $missed.AuditStatus -Expected 'Likely missed score'
+    }
+    else { Write-TestResult -Name 'Audit ran on API data' -Passed $false -Detail 'no detail report' }
+
+    # Missing credentials -> exit 2, and no API call is made
+    $env:GENESYS_CLIENT_SECRET = ''
+    $global:NpsMockCalls = @()
+    & $connectorScript -OutputPath $connectorOut -ConfigPath $noConfig *> $null
+    Assert-Equal -Name 'Missing GENESYS_CLIENT_SECRET returns exit code 2' -Actual $LASTEXITCODE -Expected 2
+    Assert-Equal -Name 'No API call made without credentials' -Actual $global:NpsMockCalls.Count -Expected 0
+    $env:GENESYS_CLIENT_SECRET = 'test-secret-do-not-print'
+
+    # A config file holding a secret is refused
+    $badConfig = Join-Path $connectorOut 'bad-config.json'
+    Set-Content -LiteralPath $badConfig -Value '{ "region": "mypurecloud.com.au", "clientSecret": "oops" }' -Encoding UTF8
+    & $connectorScript -OutputPath $connectorOut -ConfigPath $badConfig *> $null
+    Assert-Equal -Name 'Config containing a secret is refused (exit code 2)' -Actual $LASTEXITCODE -Expected 2
+
+    # Auth failure -> exit 3
+    $global:NpsMockFail401 = $true
+    & $connectorScript -OutputPath $connectorOut -ConfigPath $noConfig *> $null
+    Assert-Equal -Name 'Authentication failure returns exit code 3' -Actual $LASTEXITCODE -Expected 3
+    $global:NpsMockFail401 = $false
+
+    Remove-Item -LiteralPath $connectorOut -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Remove-Item -Path Function:\Invoke-RestMethod -ErrorAction SilentlyContinue
+Remove-Variable -Name NpsMockCalls, NpsMockFail401, NpsMockFixture -Scope Global -ErrorAction SilentlyContinue
+$env:GENESYS_CLIENT_ID = $savedId
+$env:GENESYS_CLIENT_SECRET = $savedSecret
+$env:GENESYS_REGION = $savedRegion
 
 # ---------------------------------------------------------------------------------------------
 # Result

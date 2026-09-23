@@ -1,0 +1,15 @@
+{
+  "_comment": "Non-secret settings only. Copy to config/genesys-connector.json (git-ignored) and edit. Credentials NEVER go here: use the GENESYS_CLIENT_ID and GENESYS_CLIENT_SECRET environment variables.",
+  "region": "mypurecloud.com.au",
+  "days": 7,
+  "queueIds": [],
+  "defaultQuestion": "How likely are you to recommend us from zero to ten?",
+  "attributes": {
+    "SurveyId": "Survey.Id",
+    "Question": "Survey.Question",
+    "Utterance": "Survey.Utterance",
+    "Score": "Survey.Score",
+    "Confidence": "Survey.Confidence",
+    "Status": "Survey.Status"
+  }
+}

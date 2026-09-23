@@ -17,6 +17,7 @@ input/
 *.xlsx
 *.xls
 *-export*.csv
+genesys-survey-export-*.csv
 *_export*.csv
 *.production.csv
 *.prod.csv
@@ -55,6 +56,9 @@ secrets.*
 config.local.*
 settings.local.*
 local-config/
+# Connector config is local; only the example is tracked.
+config/*.json
+!config/*.example.json
 
 # ------------------------------------------------------------------
 # PowerShell / tooling

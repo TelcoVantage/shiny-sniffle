@@ -7,7 +7,10 @@ reads a CSV export, works out which score each customer actually gave, compares 
 that was recorded, and produces CSV and HTML reports showing missed scores, mismatches, ambiguous
 answers, invalid ratings, low-confidence captures, silence, and abandoned surveys.
 
-- Runs **fully offline** from a CSV file. No API connection, credentials, or internet access.
+- Runs **fully offline** from a CSV file, or pulls the **last 7 days directly from Genesys Cloud**
+  (Australia region by default) with the optional API connector.
+- **No credentials in code or prompts.** The connector reads the OAuth client ID and secret from
+  environment variables only.
 - **Windows PowerShell 5.1** compatible, and safe under **Constrained Language Mode**
   (AppLocker / WDAC locked-down endpoints). No modules, no `Add-Type`, no .NET static calls.
 - Ships with **synthetic sample data only**.
@@ -48,7 +51,9 @@ quality teams a repeatable way to measure capture accuracy and find the records 
 - **Nine audit statuses** with High / Medium / None priority.
 - **Official NPS** and a separate, clearly labelled **audit-estimated NPS**.
 - **Four reports:** detail CSV, exceptions CSV, summary CSV, and a standalone HTML report.
-- **157 plain-PowerShell tests** (no Pester required), including an end-to-end run.
+- **Optional Genesys Cloud connector:** OAuth client credentials from environment variables, last
+  7 days by default, Australia region by default, retries on rate limits, one-command download and audit.
+- **198 plain-PowerShell tests** (no Pester required), including end-to-end runs and a mocked API.
 
 ## Example report
 
@@ -120,6 +125,21 @@ Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File
 
 Open the generated `output\nps-audit-report-YYYYMMDD-HHMMSS.html` in any browser.
 
+### Pull the last 7 days from Genesys Cloud (Australia)
+
+Set `GENESYS_CLIENT_ID` and `GENESYS_CLIENT_SECRET` as environment variables **once**. Use your
+secret manager or the Windows environment-variables dialog, never a script. Then run:
+
+```powershell
+.\Get-GenesysNpsSurveyData.ps1 -RunAudit -ExportHtmlReport
+```
+
+This authenticates against `login.mypurecloud.com.au`, queries the last 7 days of conversation
+details from `api.mypurecloud.com.au`, extracts the survey participant data, and runs the audit.
+Nothing is prompted for, and no credential is stored in code, config, output, or console text.
+Setup, required permissions, and attribute mapping are in
+[docs/genesys-api-connector.md](docs/genesys-api-connector.md).
+
 ### More examples
 
 ```powershell
@@ -132,7 +152,7 @@ Open the generated `output\nps-audit-report-YYYYMMDD-HHMMSS.html` in any browser
 # Defaults: sample data in, .\output out
 .\Export-GenesysNpsAudit.ps1 -ExportHtmlReport
 
-# Unit tests only (skip the end-to-end run)
+# Unit tests only (skip the end-to-end runs)
 .\tests\Test-NpsScoreDetection.ps1 -SkipIntegration
 
 # Audit a single utterance interactively
@@ -238,7 +258,10 @@ NPS = % Promoters - % Detractors        (range -100 to +100)
 - **Never commit** production exports, recordings, transcripts, ANI/DNIS, customer or employee
   details, real conversation IDs, tokens, OAuth secrets, tenant URLs, or queue names.
 - Generated reports are git-ignored by default because they contain utterances.
-- The tool is offline-only; the summary records the input file name, never the full local path.
+- The audit itself is offline. The optional connector talks only to your Genesys Cloud region and
+  reads credentials from environment variables only. It refuses to run if a config file contains
+  a secret.
+- The summary records the input file name, never the full local path.
 
 Read [docs/privacy-and-security.md](docs/privacy-and-security.md) before using real data.
 
@@ -253,6 +276,8 @@ The scripts are written for locked-down Windows endpoints:
 - HTML encoding with string `.Replace()` instead of `System.Web`
 - Script files are pure ASCII, so Windows PowerShell 5.1 reads them identically without a BOM
 
+- Base64 for the OAuth Basic header implemented in pure PowerShell with bit operators
+
 The full test suite passes with `$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'`.
 
 ## Repository structure
@@ -264,6 +289,10 @@ genesys-nps-survey-auditor/
 ├── .gitignore
 ├── Export-GenesysNpsAudit.ps1          main entry script: import, analyse, report
 ├── Invoke-NpsUtteranceAnalysis.ps1     reusable detection and classification functions
+├── Get-GenesysNpsSurveyData.ps1        optional connector: last 7 days from Genesys Cloud
+├── GenesysCloudApi.ps1                 connector functions (OAuth, query, mapping)
+├── config/
+│   └── genesys-connector.example.json  non-secret connector settings (copy to .json, git-ignored)
 ├── sample-data/
 │   └── survey-responses.csv            52 synthetic survey responses
 ├── output/
@@ -272,14 +301,15 @@ genesys-nps-survey-auditor/
 │   └── Test-NpsScoreDetection.ps1      plain-PowerShell test suite
 └── docs/
     ├── scoring-rules.md
+    ├── genesys-api-connector.md
     ├── privacy-and-security.md
     └── example-findings.md
 ```
 
 ## Roadmap
 
-- [ ] Optional Genesys Cloud API connector for survey and conversation data, reading credentials
-      from environment variables or an approved secret store (never hard-coded)
+- [x] Optional Genesys Cloud API connector (credentials from environment variables, last 7 days, Australia default)
+- [ ] Async analytics jobs for very large organisations
 - [ ] Date-range and channel filters
 - [ ] Trend comparison between two audit runs
 - [ ] Configurable correction cues and quantity words via a local JSON file

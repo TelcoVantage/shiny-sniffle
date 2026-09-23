@@ -28,7 +28,8 @@ project is designed so it can be demonstrated publicly **without any of that dat
 
 ## What the tool itself does
 
-- Runs **entirely offline**. It makes no network calls and loads no remote resources.
+- The audit runs **entirely offline**. It makes no network calls and loads no remote resources.
+  Only the optional connector makes network calls, and only to your Genesys Cloud region.
 - The HTML report is fully self-contained: embedded CSS, no JavaScript, no CDNs, no external
   images or fonts.
 - The summary report records the **input file name only**, not the full path, so local user
@@ -38,20 +39,22 @@ project is designed so it can be demonstrated publicly **without any of that dat
 - The scripts are compatible with Constrained Language Mode, so they can run on endpoints locked
   down with AppLocker or WDAC without requesting policy exceptions.
 
-## Future API integration
+## API connector
 
-Version one deliberately has no API connector. A future optional connector must:
+The optional connector (`Get-GenesysNpsSurveyData.ps1`, see [genesys-api-connector.md](genesys-api-connector.md)):
 
-- Read credentials from **environment variables** or an **approved secret store**
-  (for example Windows Credential Manager, a vault, or the platform's managed identity).
-  **Never hard-code credentials**, and never accept secrets as plain command-line arguments that
-  end up in shell history or process listings.
-- Use the least-privileged OAuth client and scopes that can read survey data, and nothing more.
-- Validate every API response explicitly (for example, confirm an `access_token` is present
-  before continuing) instead of assuming success.
-- Never log tokens, authorisation headers, or full response bodies.
-- Write downloaded data only to git-ignored locations.
-- Stay CLM-safe: no `.NET` static method calls, no `Add-Type`, no external modules.
+- Reads credentials from the **environment variables** `GENESYS_CLIENT_ID` and
+  `GENESYS_CLIENT_SECRET` only. These are populated by a secret manager, deployment tool, or the
+  Windows environment-variables dialog. It **never prompts** for them and **never hard-codes** them.
+- **Refuses to run** if `config/genesys-connector.json` contains anything that looks like a credential.
+- Should use a least-privileged OAuth client whose only permission is
+  **Analytics > Conversation Detail > View**.
+- Validates the OAuth response explicitly (checks that `access_token` exists) before continuing.
+- Never logs tokens, authorisation headers, secrets, or full response bodies. The client ID is
+  shown masked (`****ab12`).
+- Writes downloaded data only to the git-ignored `output/` folder. This data is **real customer
+  data**: delete it when you are finished.
+- Stays CLM-safe: no .NET static method calls, no `Add-Type`, no external modules.
 
 ## Reporting a security issue
 
