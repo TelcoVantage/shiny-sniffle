@@ -1,0 +1,53 @@
+surveyId,conversationId,completedAt,channel,question,utterance,recordedScore,confidence,participantStatus
+nps-1001,sample-conv-0001,2026-09-20T09:12:00Z,Voice,How likely are you to recommend us from zero to ten?,0,0,0.91,Completed
+nps-1002,sample-conv-0002,2026-09-20T09:18:00Z,Digital,How likely are you to recommend us from zero to ten?,zero,0,,Completed
+nps-1003,sample-conv-0003,2026-09-20T09:25:00Z,Voice,How likely are you to recommend us from zero to ten?,zero out of ten,0,0.86,Completed
+nps-1004,sample-conv-0004,2026-09-20T09:31:00Z,Voice,How likely are you to recommend us from zero to ten?,1,1,0.88,Completed
+nps-1005,sample-conv-0005,2026-09-20T09:40:00Z,Voice,How likely are you to recommend us from zero to ten?,one,1,0.84,Completed
+nps-1006,sample-conv-0006,2026-09-20T09:47:00Z,Digital,How likely are you to recommend us from zero to ten?,2,2,,Completed
+nps-1007,sample-conv-0007,2026-09-20T09:55:00Z,Voice,How likely are you to recommend us from zero to ten?,two out of ten,2,0.86,Completed
+nps-1008,sample-conv-0008,2026-09-20T10:03:00Z,Voice,How likely are you to recommend us from zero to ten?,3,3,0.90,Completed
+nps-1009,sample-conv-0009,2026-09-20T10:11:00Z,Digital,How likely are you to recommend us from zero to ten?,three,3,,Completed
+nps-1010,sample-conv-0010,2026-09-20T10:19:00Z,Voice,How likely are you to recommend us from zero to ten?,4 out of 10,4,0.87,Completed
+nps-1011,sample-conv-0011,2026-09-20T10:26:00Z,Voice,How likely are you to recommend us from zero to ten?,I rate it four out of ten,4,0.82,Completed
+nps-1012,sample-conv-0012,2026-09-20T10:34:00Z,Digital,How likely are you to recommend us from zero to ten?,5,5,,Completed
+nps-1013,sample-conv-0013,2026-09-20T10:42:00Z,Voice,How likely are you to recommend us from zero to ten?,five,5,0.93,Completed
+nps-1014,sample-conv-0014,2026-09-20T10:50:00Z,Voice,How likely are you to recommend us from zero to ten?,6,6,0.89,Completed
+nps-1015,sample-conv-0015,2026-09-20T10:58:00Z,Voice,How likely are you to recommend us from zero to ten?,it is a six,6,0.80,Completed
+nps-1016,sample-conv-0016,2026-09-20T11:05:00Z,Digital,How likely are you to recommend us from zero to ten?,six out of ten,6,,Completed
+nps-1017,sample-conv-0017,2026-09-20T11:13:00Z,Voice,How likely are you to recommend us from zero to ten?,7,7,0.92,Completed
+nps-1018,sample-conv-0018,2026-09-20T11:21:00Z,Voice,How likely are you to recommend us from zero to ten?,probably a seven,7,0.78,Completed
+nps-1019,sample-conv-0019,2026-09-20T11:29:00Z,Digital,How likely are you to recommend us from zero to ten?,8,8,,Completed
+nps-1020,sample-conv-0020,2026-09-20T11:36:00Z,Voice,How likely are you to recommend us from zero to ten?,I would say eight,8,0.81,Completed
+nps-1021,sample-conv-0021,2026-09-20T11:44:00Z,Voice,How likely are you to recommend us from zero to ten?,probably an 8,8,0.90,Completed
+nps-1022,sample-conv-0022,2026-09-20T11:52:00Z,Voice,How likely are you to recommend us from zero to ten?,9,9,0.95,Completed
+nps-1023,sample-conv-0023,2026-09-20T12:00:00Z,Voice,How likely are you to recommend us from zero to ten?,I'd give you a nine,9,0.83,Completed
+nps-1024,sample-conv-0024,2026-09-20T12:08:00Z,Digital,How likely are you to recommend us from zero to ten?,nine out of ten,9,,Completed
+nps-1025,sample-conv-0025,2026-09-20T12:15:00Z,Voice,How likely are you to recommend us from zero to ten?,10,10,0.97,Completed
+nps-1026,sample-conv-0026,2026-09-20T12:23:00Z,Voice,How likely are you to recommend us from zero to ten?,ten,10,0.90,Completed
+nps-1027,sample-conv-0027,2026-09-20T12:31:00Z,Digital,How likely are you to recommend us from zero to ten?,10/10,10,,Completed
+nps-1028,sample-conv-0028,2026-09-20T12:39:00Z,Voice,How likely are you to recommend us from zero to ten?,10 out of 10,10,0.94,Completed
+nps-1029,sample-conv-0029,2026-09-20T12:46:00Z,Voice,How likely are you to recommend us from zero to ten?,a ten,10,0.88,Completed
+nps-1030,sample-conv-0030,2026-09-20T12:54:00Z,Voice,How likely are you to recommend us from zero to ten?,make that ten,10,0.79,Completed
+nps-1031,sample-conv-0031,2026-09-20T13:02:00Z,Voice,How likely are you to recommend us from zero to ten?,seven... actually make that eight,8,0.76,Completed
+nps-1032,sample-conv-0032,2026-09-20T13:10:00Z,Voice,How likely are you to recommend us from zero to ten?,"nine, no, ten",10,0.81,Completed
+nps-1033,sample-conv-0033,2026-09-20T13:17:00Z,Voice,How likely are you to recommend us from zero to ten?,"I was going to say six, but make it seven",6,0.74,Completed
+nps-1034,sample-conv-0034,2026-09-20T13:25:00Z,Voice,How likely are you to recommend us from zero to ten?,ten out of ten,,0.58,Completed
+nps-1035,sample-conv-0035,2026-09-20T13:33:00Z,Voice,How likely are you to recommend us from zero to ten?,I'd say a 9,6,0.71,Completed
+nps-1036,sample-conv-0036,2026-09-20T13:41:00Z,Voice,How likely are you to recommend us from zero to ten?,eight,8,0.52,Completed
+nps-1037,sample-conv-0037,2026-09-20T13:48:00Z,Voice,How likely are you to recommend us from zero to ten?,yeah it was good,,0.66,Completed
+nps-1038,sample-conv-0038,2026-09-20T13:56:00Z,Voice,How likely are you to recommend us from zero to ten?,not bad,,0.61,Completed
+nps-1039,sample-conv-0039,2026-09-20T14:04:00Z,Digital,How likely are you to recommend us from zero to ten?,pretty happy,,,Completed
+nps-1040,sample-conv-0040,2026-09-20T14:12:00Z,Voice,How likely are you to recommend us from zero to ten?,eleven,,0.77,Completed
+nps-1041,sample-conv-0041,2026-09-20T14:19:00Z,Voice,How likely are you to recommend us from zero to ten?,one hundred,,0.80,Completed
+nps-1042,sample-conv-0042,2026-09-20T14:27:00Z,Voice,How likely are you to recommend us from zero to ten?,minus one,,0.69,Completed
+nps-1043,sample-conv-0043,2026-09-20T14:35:00Z,Voice,How likely are you to recommend us from zero to ten?,,,,Completed
+nps-1044,sample-conv-0044,2026-09-20T14:43:00Z,Voice,How likely are you to recommend us from zero to ten?,,,,Timeout
+nps-1045,sample-conv-0045,2026-09-20T14:50:00Z,Voice,How likely are you to recommend us from zero to ten?,seven,,0.40,Disconnected
+nps-1046,sample-conv-0046,2026-09-20T14:58:00Z,Digital,How likely are you to recommend us from zero to ten?,,,,Abandoned
+nps-1047,sample-conv-0047,2026-09-20T15:06:00Z,Digital,How likely are you to recommend us from zero to ten?,The agent was really helpful and sorted my billing question quickly.,,,Completed
+nps-1048,sample-conv-0048,2026-09-20T15:14:00Z,Voice,How likely are you to recommend us from zero to ten?,"nine... no, ten",10,0.84,Completed
+nps-1049,sample-conv-0049,2026-09-20T15:21:00Z,Voice,How likely are you to recommend us from zero to ten?,I waited ten minutes but I'd give you a seven,7,0.80,Completed
+nps-1050,sample-conv-0050,2026-09-20T15:29:00Z,Voice,How likely are you to recommend us from zero to ten?,eight or maybe nine,,0.72,Completed
+nps-1051,sample-conv-0051,2026-09-20T15:37:00Z,Voice,How likely are you to recommend us from zero to ten?,about seven and a half,7,0.75,Completed
+nps-1052,sample-conv-0052,2026-09-20T15:45:00Z,Digital,How likely are you to recommend us from zero to ten?,fantastic service,9,,Completed

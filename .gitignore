@@ -1,0 +1,79 @@
+# ------------------------------------------------------------------
+# Generated audit reports (may contain customer utterances)
+# ------------------------------------------------------------------
+output/*
+!output/.gitkeep
+nps-audit-*.csv
+nps-audit-*.html
+
+# ------------------------------------------------------------------
+# Raw / production exports - never commit real survey data
+# Only the synthetic file in sample-data/ is tracked.
+# ------------------------------------------------------------------
+exports/
+raw/
+data/
+input/
+*.xlsx
+*.xls
+*-export*.csv
+*_export*.csv
+*.production.csv
+*.prod.csv
+*-real*.csv
+*.sanitised-pending.csv
+
+# Recordings and transcripts
+*.wav
+*.mp3
+*.ogg
+*.opus
+*.m4a
+*.webm
+*transcript*.txt
+*transcript*.json
+
+# ------------------------------------------------------------------
+# Secrets and local configuration
+# ------------------------------------------------------------------
+.env
+.env.*
+*.secret
+*.secrets
+secrets.*
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*credential*
+*token*.json
+*.local.ps1
+*.local.psd1
+*.local.json
+config.local.*
+settings.local.*
+local-config/
+
+# ------------------------------------------------------------------
+# PowerShell / tooling
+# ------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+TestResults/
+*.Tests.Results.xml
+PSScriptAnalyzerResults*
+
+# ------------------------------------------------------------------
+# Editors and OS
+# ------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
