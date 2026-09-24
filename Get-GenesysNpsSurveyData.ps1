@@ -112,6 +112,14 @@ function Write-ConnectorFailure {
 try {
     $scriptRoot = $PSScriptRoot
     if (-not $scriptRoot) { $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    # The connector needs its companion scripts in the same folder.
+    $companions = @('GenesysCloudApi.ps1', 'Export-GenesysNpsAudit.ps1', 'Invoke-NpsUtteranceAnalysis.ps1')
+    $missingFiles = @($companions | Where-Object { -not (Test-Path -LiteralPath (Join-Path $scriptRoot $_) -PathType Leaf) })
+    if ($missingFiles.Count -gt 0) {
+        Write-ConnectorFailure ('Missing companion script(s) in ' + $scriptRoot + ': ' + ($missingFiles -join ', ') +
+            '. Copy all four .ps1 files from the repository into the same folder.')
+        exit 2
+    }
     . (Join-Path $scriptRoot 'GenesysCloudApi.ps1')
 
     if (-not $OutputPath) { $OutputPath = Join-Path $scriptRoot 'output' }
