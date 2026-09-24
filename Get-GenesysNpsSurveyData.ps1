@@ -6,8 +6,9 @@
 .DESCRIPTION
     Optional API connector for the Genesys NPS Survey Auditor.
 
-      1. Reads OAuth client credentials from environment variables GENESYS_CLIENT_ID and
-         GENESYS_CLIENT_SECRET. Nothing is prompted for, and no credential is stored in code,
+      1. Reads OAuth client credentials from the values embedded at the top of this script, or,
+         when those are empty, from environment variables GENESYS_CLIENT_ID and
+         GENESYS_CLIENT_SECRET. Nothing is prompted for, and credentials are never written to
          config files, output files, or console output.
       2. Gets an access token (client credentials grant) from login.<region>.
       3. Queries analytics conversation details for the last N days (default 7), one day at a time.
@@ -82,6 +83,22 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# =============================================================================================
+# OAuth client credentials (optional - embedded in this script)
+# ---------------------------------------------------------------------------------------------
+# Paste your Genesys Cloud OAuth client ID and secret between the quotes to embed them here.
+# When these are filled in they are used first; when empty, the GENESYS_CLIENT_ID and
+# GENESYS_CLIENT_SECRET environment variables are used instead.
+#
+# WARNING: anyone who can read this file can use these credentials.
+#   - Use a read-only OAuth client (Analytics > Conversation Detail > View only).
+#   - NEVER commit this file with real values. After cloning, run once:
+#         git update-index --skip-worktree Get-GenesysNpsSurveyData.ps1
+#     so Git ignores your local edits to this file.
+# =============================================================================================
+$EmbeddedClientId     = ''
+$EmbeddedClientSecret = ''
 
 $SchemaColumns = @('surveyId', 'conversationId', 'completedAt', 'channel', 'question',
                    'utterance', 'recordedScore', 'confidence', 'participantStatus')
@@ -160,16 +177,20 @@ try {
     $defaultQuestion = 'How likely are you to recommend us from zero to ten?'
     if ($null -ne $config -and $config.defaultQuestion) { $defaultQuestion = [string]$config.defaultQuestion }
 
-    # ---- Credentials (environment only) -------------------------------------------------
-    try { $credential = Get-GcCredentialFromEnvironment }
+    # ---- Credentials: embedded values first, then environment variables ------------------
+    try { $credential = Resolve-GcCredential -ClientId $EmbeddedClientId -ClientSecret $EmbeddedClientSecret }
     catch { Write-ConnectorFailure $_.Exception.Message; exit 2 }
+    $EmbeddedClientSecret = $null
+    if ($credential.Source -eq 'Embedded') {
+        Write-Host 'Warning: using credentials embedded in Get-GenesysNpsSurveyData.ps1. Do not commit or share this file.' -ForegroundColor Yellow
+    }
 
     $intervals = @(Get-GcDailyIntervals -Days $Days)
     $firstStart = ($intervals[0] -split '/')[0]
     $lastEnd = ($intervals[$intervals.Count - 1] -split '/')[1]
 
     Write-Host ("Region               : $domain  (from $regionSource)")
-    Write-Host ("OAuth client         : " + (Get-GcMaskedValue $credential.ClientId) + '  (from GENESYS_CLIENT_ID)')
+    Write-Host ("OAuth client         : " + (Get-GcMaskedValue $credential.ClientId) + '  (from ' + $credential.SourceLabel + ')')
     Write-Host ("Date range (UTC)     : $firstStart  ->  $lastEnd  ($Days day(s))")
     if ($queues.Count -gt 0) { Write-Host ('Queue filter         : ' + $queues.Count + ' queue(s)') }
     $pinned = ''

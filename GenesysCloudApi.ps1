@@ -8,8 +8,9 @@
         . .\GenesysCloudApi.ps1
 
     Security:
-        - Credentials are read from environment variables only (GENESYS_CLIENT_ID and
-          GENESYS_CLIENT_SECRET). They are never prompted for, hard-coded, written to disk, or logged.
+        - Credentials come from values embedded in Get-GenesysNpsSurveyData.ps1 (optional) or the
+          GENESYS_CLIENT_ID / GENESYS_CLIENT_SECRET environment variables. They are never prompted
+          for, written to output files, or logged.
         - The OAuth access token is held in memory only for the duration of the run.
 
     Compatibility:
@@ -149,6 +150,34 @@ function Get-GcCredentialFromEnvironment {
     }
 
     return @{ ClientId = $id.Trim(); ClientSecret = $secret.Trim() }
+}
+
+function Resolve-GcCredential {
+    <#
+    .SYNOPSIS
+        Returns the OAuth credentials to use: embedded values when both are supplied,
+        otherwise the GENESYS_CLIENT_ID / GENESYS_CLIENT_SECRET environment variables.
+    .OUTPUTS
+        @{ ClientId; ClientSecret; Source = Embedded | Environment; SourceLabel }
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$ClientId = '',
+        [AllowEmptyString()][string]$ClientSecret = ''
+    )
+
+    $id = ''; if ($null -ne $ClientId) { $id = $ClientId.Trim() }
+    $secret = ''; if ($null -ne $ClientSecret) { $secret = $ClientSecret.Trim() }
+
+    if ($id -ne '' -and $secret -ne '') {
+        return @{ ClientId = $id; ClientSecret = $secret; Source = 'Embedded'; SourceLabel = 'embedded in script' }
+    }
+    if ($id -ne '' -or $secret -ne '') {
+        throw 'Only one of the embedded client ID / client secret is filled in. Fill in both, or leave both empty to use environment variables.'
+    }
+
+    $fromEnv = Get-GcCredentialFromEnvironment
+    return @{ ClientId = $fromEnv.ClientId; ClientSecret = $fromEnv.ClientSecret; Source = 'Environment'; SourceLabel = 'GENESYS_CLIENT_ID' }
 }
 
 function Get-GcMaskedValue {

@@ -43,9 +43,11 @@ project is designed so it can be demonstrated publicly **without any of that dat
 
 The optional connector (`Get-GenesysNpsSurveyData.ps1`, see [genesys-api-connector.md](genesys-api-connector.md)):
 
-- Reads credentials from the **environment variables** `GENESYS_CLIENT_ID` and
-  `GENESYS_CLIENT_SECRET` only. These are populated by a secret manager, deployment tool, or the
-  Windows environment-variables dialog. It **never prompts** for them and **never hard-codes** them.
+- Reads credentials from values **embedded locally** at the top of the script (optional; the
+  user accepts the risk) or from the **environment variables** `GENESYS_CLIENT_ID` and
+  `GENESYS_CLIENT_SECRET`. It **never prompts** for them. The repository copy always ships with
+  empty embedded values, and a test fails if real values are committed. Protect local edits with
+  `git update-index --skip-worktree Get-GenesysNpsSurveyData.ps1`.
 - **Refuses to run** if `config/genesys-connector.json` contains anything that looks like a credential.
 - Should use a least-privileged OAuth client whose only permission is
   **Analytics > Conversation Detail > View**.

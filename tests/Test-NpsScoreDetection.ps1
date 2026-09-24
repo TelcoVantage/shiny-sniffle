@@ -308,6 +308,19 @@ $env:GENESYS_REGION = ''
 $missingThrows = $false
 try { Get-GcCredentialFromEnvironment | Out-Null } catch { $missingThrows = ($_.Exception.Message -match 'GENESYS_CLIENT_ID') }
 Write-TestResult -Name 'Missing credential environment variables give a clear error' -Passed $missingThrows -Detail 'no error'
+$embedded = Resolve-GcCredential -ClientId ' embedded-id-1234 ' -ClientSecret 'embedded-secret'
+Assert-Equal -Name 'Embedded credentials are used when both are filled in' -Actual ($embedded.Source + '/' + $embedded.ClientId) -Expected 'Embedded/embedded-id-1234'
+$halfEmbedded = $false
+try { Resolve-GcCredential -ClientId 'only-id' -ClientSecret '' | Out-Null } catch { $halfEmbedded = ($_.Exception.Message -match 'Only one') }
+Write-TestResult -Name 'Only one embedded value gives a clear error' -Passed $halfEmbedded -Detail 'no error'
+$env:GENESYS_CLIENT_ID = 'env-id-5678'
+$env:GENESYS_CLIENT_SECRET = 'env-secret'
+$fromEnv = Resolve-GcCredential -ClientId '' -ClientSecret ''
+Assert-Equal -Name 'Empty embedded values fall back to environment variables' -Actual ($fromEnv.Source + '/' + $fromEnv.ClientId) -Expected 'Environment/env-id-5678'
+$env:GENESYS_CLIENT_ID = ''
+$env:GENESYS_CLIENT_SECRET = ''
+$shipsEmpty = ((Get-Content -LiteralPath (Join-Path $repoRoot 'Get-GenesysNpsSurveyData.ps1') -Raw) -match "(?m)^\`$EmbeddedClientId\s*=\s*''\s*`r?`n\`$EmbeddedClientSecret\s*=\s*''")
+Write-TestResult -Name 'Repository copy ships with empty embedded credentials' -Passed $shipsEmpty -Detail 'embedded values are not empty - do not commit real credentials'
 Assert-Equal -Name 'Masked client id shows last 4 only' -Actual (Get-GcMaskedValue 'abcdef123456') -Expected '****3456'
 
 # Mapping a conversation to the auditor schema (fictional IDs)

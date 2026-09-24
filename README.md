@@ -9,8 +9,8 @@ answers, invalid ratings, low-confidence captures, silence, and abandoned survey
 
 - Runs **fully offline** from a CSV file, or pulls the **last 7 days directly from Genesys Cloud**
   (Australia region by default) with the optional API connector.
-- **No credentials in code or prompts.** The connector reads the OAuth client ID and secret from
-  environment variables only.
+- **No credential prompts.** The OAuth client ID and secret are embedded once in the script (kept
+  out of Git) or read from environment variables.
 - **Windows PowerShell 5.1** compatible, and safe under **Constrained Language Mode**
   (AppLocker / WDAC locked-down endpoints). No modules, no `Add-Type`, no .NET static calls.
 - Ships with **synthetic sample data only**.
@@ -55,7 +55,7 @@ quality teams a repeatable way to measure capture accuracy and find the records 
   7 days by default, Australia region by default, **automatic detection of completed, incomplete
   and declined surveys** (no conversation IDs or attribute names needed), retries on rate limits,
   one-command download and audit.
-- **227 plain-PowerShell tests** (no Pester required), including end-to-end runs and a mocked API.
+- **231 plain-PowerShell tests** (no Pester required), including end-to-end runs and a mocked API.
 
 ## Example report
 
@@ -129,8 +129,10 @@ Open the generated `output\nps-audit-report-YYYYMMDD-HHMMSS.html` in any browser
 
 ### Pull the last 7 days from Genesys Cloud (Australia)
 
-Set `GENESYS_CLIENT_ID` and `GENESYS_CLIENT_SECRET` as environment variables **once**. Use your
-secret manager or the Windows environment-variables dialog, never a script. Then run:
+Provide the OAuth client ID and secret **once**, in one of two ways. Either fill in
+`$EmbeddedClientId` / `$EmbeddedClientSecret` at the top of `Get-GenesysNpsSurveyData.ps1` and
+never commit that edit, or set the `GENESYS_CLIENT_ID` / `GENESYS_CLIENT_SECRET` environment
+variables. Then run:
 
 ```powershell
 .\Get-GenesysNpsSurveyData.ps1 -RunAudit -ExportHtmlReport
@@ -140,7 +142,7 @@ This authenticates against `login.mypurecloud.com.au` and scans every conversati
 7 days on `api.mypurecloud.com.au`. It **detects completed surveys automatically**, with no
 conversation IDs and no attribute names to configure: survey keys in participant data are
 recognised by name, and native web surveys are picked up too. It then runs the audit.
-Nothing is prompted for, and no credential is stored in code, config, output, or console text.
+Nothing is prompted for, and credentials are never written to config, output, or console text.
 Setup, required permissions, and attribute mapping are in
 [docs/genesys-api-connector.md](docs/genesys-api-connector.md).
 
@@ -262,8 +264,9 @@ NPS = % Promoters - % Detractors        (range -100 to +100)
 - **Never commit** production exports, recordings, transcripts, ANI/DNIS, customer or employee
   details, real conversation IDs, tokens, OAuth secrets, tenant URLs, or queue names.
 - Generated reports are git-ignored by default because they contain utterances.
-- The audit itself is offline. The optional connector talks only to your Genesys Cloud region and
-  reads credentials from environment variables only. It refuses to run if a config file contains
+- The audit itself is offline. The optional connector talks only to your Genesys Cloud region.
+  Credentials are either embedded locally in the script (never commit that edit) or read from
+  environment variables. It refuses to run if a config file contains
   a secret.
 - The summary records the input file name, never the full local path.
 

@@ -7,8 +7,8 @@ Genesys Cloud (the **Australia** region by default) and, with `-RunAudit`, audit
 .\Get-GenesysNpsSurveyData.ps1 -RunAudit -ExportHtmlReport
 ```
 
-You never type or embed a client ID or secret. The script reads them from environment variables
-that are set once, outside the code.
+You don't type the client ID or secret on each run. Either embed them once at the top of the
+script, or set them once as environment variables.
 
 > Independent community project. Not an official Genesys product, integration, or endorsement.
 > The connector has been tested against a mocked API only. Validate it against a non-production org first.
@@ -25,7 +25,37 @@ that are set once, outside the code.
    - Role: the read-only role above (scoped to the divisions you need)
 3. Note the Client ID and Client Secret. Treat the secret like a password.
 
-## 2. Provide the credentials as environment variables (one-time)
+## 2. Provide the credentials (one-time)
+
+Choose **one** of the two options below. Embedded values take precedence when both are filled in.
+
+### Option A: embed them in the script (simplest, you accept the risk)
+
+Open `Get-GenesysNpsSurveyData.ps1`. Near the top, fill in:
+
+```powershell
+$EmbeddedClientId     = 'your-client-id'
+$EmbeddedClientSecret = 'your-client-secret'
+```
+
+Then, in the repository folder, run this **once** so Git never picks up your edit:
+
+```powershell
+git update-index --skip-worktree Get-GenesysNpsSurveyData.ps1
+```
+
+- Anyone who can read the file can use the credentials. Keep the file on your machine only, and
+  use the read-only OAuth client from step 1.
+- Fill in both values or neither. If only one is filled in, the script stops with a clear error.
+- The console shows a yellow warning and the masked client ID: `****ab12 (from embedded in script)`.
+- The test suite checks that the committed copy has **empty** values, so it fails if real
+  credentials are ever committed.
+- To pull script updates later: run `git update-index --no-skip-worktree Get-GenesysNpsSurveyData.ps1`,
+  stash your edit, pull, re-apply your edit, then run the `--skip-worktree` command again.
+
+### Option B: environment variables (recommended for shared or managed machines)
+
+Leave the embedded values empty and set these instead:
 
 | Variable | Required | Value |
 |---|---|---|
